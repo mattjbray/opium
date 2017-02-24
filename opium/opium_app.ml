@@ -10,19 +10,66 @@ open Rock
 
 module Co = Cohttp
 
+module ConnectionMap = struct
+  include Map.Make(Co.Connection)
+
+  let pop : Co.Connection.t -> 'a t -> 'a option * 'a t =
+    fun connection map ->
+      let result =
+        try Some (find connection map) with
+        | Not_found -> None
+      in
+      (result, remove connection map)
+end
+
+module Lwt_mvar_extra = struct
+  let with_mvar : 'a Lwt_mvar.t -> ('a -> 'b * 'a) -> 'b Lwt.t =
+    fun mvar f ->
+      Lwt_mvar.take mvar >>= fun a ->
+      Lwt.catch
+        (fun () ->
+           let x, a' = f a in
+           Lwt_mvar.put mvar a' >>= fun () ->
+           Lwt.return x)
+        (fun exn ->
+           Lwt_mvar.put mvar a >>= fun () ->
+           Lwt.fail exn)
+
+  let modify_mvar : 'a Lwt_mvar.t -> ('a -> 'a) -> unit Lwt.t =
+    fun mvar f ->
+      with_mvar mvar (fun a -> ((), f a))
+end
+
 let run_unix ?ssl t ~port =
   let middlewares = t |> App.middlewares |> List.map ~f:Middleware.filter in
   let handler = App.handler t in
   let mode = Option.value_map ssl
                ~default:(`TCP (`Port port)) ~f:(fun (c, k) ->
                  `TLS (c, k, `No_password, `Port port)) in
+  (* Map of Cohttp.Connection.t to conn_closed handlers. *)
+  let connection_map_mvar = Lwt_mvar.create ConnectionMap.empty in
   Server.create ~mode (
-    Server.make ~callback:(fun _ req body ->
-      let req = Request.create ~body req in
-      let handler = Filter.apply_all middlewares handler in
-      handler req >>= fun { Response.code; headers; body } ->
-      Server.respond ~headers ~body ~status:code ()
-    ) ()
+    Server.make ()
+      ~callback:(fun (_, conn_id) req body ->
+        Lwt_log.info_f "conn_received: %s" (Co.Connection.to_string conn_id) >>= fun () ->
+        let req = Request.create ~body req in
+        let handler = Filter.apply_all middlewares handler in
+        handler req >>= fun { Response.code; headers; body; conn_closed } ->
+        Option.value_map conn_closed ~default:Lwt.return_unit
+          ~f:(fun on_close ->
+            (* Add the user's on_close hook to the Map. *)
+            Lwt_mvar_extra.modify_mvar connection_map_mvar
+              (ConnectionMap.add conn_id on_close)) >>= fun () ->
+        Server.respond ~headers ~body ~status:code ()
+      )
+      ~conn_closed:(fun (_, conn_id) ->
+        (* Execute the user's on_close hook for this connection. *)
+        Lwt.ignore_result
+          (Lwt_log.info_f "conn_closed: %s" (Co.Connection.to_string conn_id) >>= fun () ->
+           Lwt_mvar_extra.with_mvar connection_map_mvar (ConnectionMap.pop conn_id) >>=
+           Option.value_map ~default:Lwt.return_unit
+             ~f:(fun on_close -> on_close ()))
+      )
   )
 
 type t = {

@@ -55,7 +55,8 @@ module Response : sig
     code:    Cohttp.Code.status_code;
     headers: Cohttp.Header.t;
     body:    Cohttp_lwt_body.t;
-    env:     Opium_hmap.t
+    env:     Opium_hmap.t;
+    conn_closed: (unit -> unit Lwt.t) option
   } [@@deriving fields, sexp_of]
 
   val create :
@@ -63,6 +64,7 @@ module Response : sig
     ?body:Cohttp_lwt_body.t ->
     ?headers:Cohttp.Header.t ->
     ?code:Cohttp.Code.status_code ->
+    ?conn_closed:(unit -> unit Lwt.t) ->
     unit -> t
 
   val of_string_body :

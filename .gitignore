@@ -46,5 +46,6 @@ examples/middleware_ua
 examples/read_json_body
 examples/sample
 examples/static_serve_override
+examples/streaming_response
 examples/uppercase_middleware
 lib_test/routes

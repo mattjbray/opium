@@ -37,19 +37,21 @@ module Response = struct
     code: Code.status_code;
     headers: Header.t;
     body: Body.t;
-    env: Opium_hmap.t
+    env: Opium_hmap.t;
+    conn_closed: (unit -> unit Lwt.t) option
   } [@@deriving fields, sexp_of]
 
   let default_header = Option.value ~default:(Header.init ())
 
   let create ?(env=Opium_hmap.empty) ?(body=Body.empty)
-        ?headers ?(code=`OK) () =
+        ?headers ?(code=`OK) ?conn_closed () =
     { code; env;
       headers=Option.value ~default:(Header.init ()) headers;
-      body; }
+      body;
+      conn_closed; }
 
   let of_string_body ?(env=Opium_hmap.empty) ?headers ?(code=`OK) body =
-    { env; code; headers=default_header headers; body=(Body.of_string body) }
+    { env; code; headers=default_header headers; body=(Body.of_string body); conn_closed = None }
 
   let of_response_body (resp, body) =
     let code = Response.status resp in
