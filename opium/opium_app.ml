@@ -10,6 +10,11 @@ open Rock
 
 module Co = Cohttp
 
+
+let conn_key =
+  Opium_hmap.Key.create
+    ("conn", sexp_of_pair Conduit_lwt_unix.sexp_of_flow Co.Connection.sexp_of_t)
+
 let run_unix ?ssl t ~port =
   let middlewares = t |> App.middlewares |> List.map ~f:Middleware.filter in
   let handler = App.handler t in
@@ -17,8 +22,9 @@ let run_unix ?ssl t ~port =
                ~default:(`TCP (`Port port)) ~f:(fun (c, k) ->
                  `TLS (c, k, `No_password, `Port port)) in
   Server.create ~mode (
-    Server.make ~callback:(fun _ req body ->
-      let req = Request.create ~body req in
+    Server.make ~callback:(fun conn req body ->
+      let env = Opium_hmap.singleton conn_key conn in
+      let req = Request.create ~body ~env req in
       let handler = Filter.apply_all middlewares handler in
       handler req >>= fun { Response.code; headers; body } ->
       Server.respond ~headers ~body ~status:code ()

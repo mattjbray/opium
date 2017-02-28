@@ -102,3 +102,5 @@ val redirect : ?headers:Cohttp.Header.t
 val redirect' : ?headers:Cohttp.Header.t
   -> Uri.t
   -> Response.t Lwt.t
+
+val conn_key : Cohttp_lwt_unix.Server.conn Opium_hmap.key
